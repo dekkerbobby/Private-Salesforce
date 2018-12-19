@@ -1,0 +1,77 @@
+//Get list of Contacts
+List<Task> taskList = [SELECT CreatedDate,Id,Subject,WhoId,WhatId,Description,OwnerId,Owner.Name,Owner.Email FROM Task WHERE Type = 'Email' ORDER BY CreatedDate asc LIMIT 200];
+
+//Create list for all Objects that are to be created
+List<sObject> newEmailMessages = new List<sObject>();
+List<sObject> newEmailMessageRelations = new List<sObject>();
+System.debug(taskList.size());
+//Loop through each queried task
+for(Task tsk : taskList){
+                                                                                                                    //Map Task fields to new emailMessage
+                                                                                                                    EmailMessage em = new EmailMessage();
+                    em.status = '3'; // email was sent
+                    em.relatedToId = tsk.WhatId; // related to record e.g. an opportunity
+                    em.fromAddress = tsk.Owner.Email; // from address
+                    em.fromName = tsk.Owner.Name; // from name
+                    em.subject =  tsk.Subject; // email subject
+                    em.textBody = tsk.Description; // email body
+                    em.MessageDate = tsk.CreatedDate; //created date as the original taks
+                    String[] toIds = new String[]{tsk.WhoId}; // Contact, Lead or User Ids of recipients
+                    em.toIds = toIds;
+                                                                                                                    //add to lists for later use 
+                    newEmailMessages.add(em); // add EmailMessage
+                            }
+//Insert EmailMessages
+Database.SaveResult[] srList = Database.insert(newEmailMessages);
+System.debug(newEmailMessages.size());
+//Create Map of Task and new EmailMessage ids
+Map<Id, Id> m = new Map<Id, Id>(); // Define a new map
+
+System.debug('EM: '+srList.get(0).getId());
+String TaskMapString = '';
+Integer i = 0; 
+for (Task tsk : taskList) {
+    if(tsk.WhoId!=null){
+     // Add Email Message Relation for id of the recipient
+                             EmailMessageRelation emr2 = new EmailMessageRelation();
+                             emr2.emailMessageId = srList.get(i).getId();
+                             emr2.relationId = tsk.WhoId; // user id of the recipient
+                             emr2.relationType = 'ToAddress';
+                             newEmailMessageRelations.add(emr2);
+                             }//end if statement
+    // Add Email Message Relation for id of the sender
+                             EmailMessageRelation emr = new EmailMessageRelation();
+    emr.relationId = tsk.OwnerId; // user id of the sender
+                             emr.relationType = 'FromAddress';
+                             emr.emailMessageId = srList.get(i).getId();
+    newEmailMessageRelations.add(emr);
+    m.put(srList.get(i).getId(), tsk.Id);
+    i++;
+}//end for loop
+Insert newEmailMessageRelations;
+System.debug(newEmailMessageRelations.size());
+
+//delete taskList if not null;
+if(taskList !=null && taskList.size()>0){
+                              delete taskList;
+}
+
+
+//Create Process Transaction record for audit
+
+List<sObject> processTransactionRecords = new List<sObject>();
+for (id key : m.keyset()){
+    //String tempValue = m.get(key);
+    //TaskMapString +=  key + '=' +tempValue + '\n';
+    
+    ProcessTransaction__c pt = new ProcessTransaction__c();
+                             pt.Status_Code__c = 'Success'; 
+                             //pt.Success_Message__c = TaskMapString;
+    pt.Request_Details__c = m.get(key);
+    pt.Response_Details__c = key;
+    pt.Process__c = 'Other';
+    processTransactionRecords.add(pt);
+  
+}
+insert processTransactionRecords;
+
